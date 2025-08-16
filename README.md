@@ -7,3 +7,7 @@ Zpracované datové sady a generované grafy nejsou v repozitáži přiloženy. 
 ### Regression 1
 
 Zpracované úlohy naleznete ve složce [regression1](regression1/ "Zpracované úlohy Regrese 1").
+
+### Exercise 2
+
+Zpracované úlohy naleznete ve složce [exercise_2](exercise_2/ "Zpracované úlohy Loess a mnohonásobné regrese").
