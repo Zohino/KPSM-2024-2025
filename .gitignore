@@ -12,6 +12,7 @@ wheels/
 # Datasets
 /regression1/datasets/*
 !/regression1/datasets/.gitkeep
+/exercise_2/datasets
 
 # plots
 /regression1/plots/*
