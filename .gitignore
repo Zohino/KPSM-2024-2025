@@ -13,6 +13,7 @@ wheels/
 /regression1/datasets/*
 !/regression1/datasets/.gitkeep
 /exercise_2/datasets
+/exercise_3/datasets
 
 # plots
 /regression1/plots/*
