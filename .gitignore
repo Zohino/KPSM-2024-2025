@@ -21,3 +21,12 @@ wheels/
 
 # Lecture notes
 /lecture_notes/
+
+# R-related
+regression_R/renv/library
+regression_R/local/
+regression_R/cellar/
+regression_R/lock/
+regression_R/python/
+regression_Rsandbox/
+regression_R/renv/staging/
