@@ -1,0 +1,270 @@
+---
+title: "Úloha 2 - Hladina glukózy v krvi"
+author: "Martin Žoha"
+date: "2025-08-21"
+output: 
+  html_document:
+    theme: flatly
+    toc: yes
+    toc_float:
+      collapsed: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+## Zadání
+
+Použijte databázi Pima.te z knihovny MASS a zjistěte, na čem závisí hladina glukózy v krvi. Uvažujte také dvojné interakce s proměnnou type. Zvolte vhodnou regresní metodu, najděte optimální model, ověřte předpoklady, interpretujte vypočtené regresní koeficienty, ohodnoťte kvalitu modelu a spočtete předpověď spolu s 95% intervalem spolehlivosti pro ženu s diabetem (type = Yes) ve věku 35 let po čtvrtém těhotenství s bmi = 26.1 a ostatními měřenými ukazateli na průměrné hodnotě.
+
+## Zpracování
+
+### Načtení a průzkum dat
+
+Načteny jsou potřebné balíčky pro práci s daty a regresní analýzu. Poté je načtena datová sada Pima.te z balíčku MASS a je proveden počáteční průzkum dat. Funkce `head()` zobrazí prvních několik řádků, aby bylo vidět, jak data vypadají, a `summary()` poskytne základní statistický popis jednotlivých proměnných, včetně průměrů, minim a maxim, kvartilů a četností kategorií. Smyslem je připravit prostředí a seznámit se se strukturou dat před vlastním vytvářením modelu.
+
+```{r load-libraries, include=FALSE}
+library(MASS)
+library(car)
+library(corrplot)
+library(fmsb)
+library(lmtest)
+```
+
+```{r load-data}
+data(Pima.te)
+head(Pima.te)
+summary(Pima.te)
+```
+
+### Vytvoření výchozího modelu
+
+Tento kód připravuje výchozí regresní model a současně zkoumá korelace mezi proměnnými. Nejprve se proměnná type nastaví jako faktor, aby ji šlo správně použít v regresi s interakcemi. Současně se vytvoří její číselná verze type_numeric (Yes = 1, No = 0), která slouží pro korelační analýzu, protože korelace se počítá jen mezi číselnými proměnnými. Následně se vytvoří korelační matice všech číselných proměnných a vizualizuje se pomocí barevného grafu corrplot, což umožňuje rychle odhalit silné nebo slabé souvislosti mezi proměnnými. Nakonec se vytvoří plný lineární model default_mod, který zahrnuje všechny hlavní efekty a jejich interakce s proměnnou type, a zobrazí se jeho shrnutí (summary) spolu s AIC pro orientační hodnocení kvality modelu. Tento krok slouží k vytvoření výchozího modelu pro další optimalizaci a interpretaci.
+
+```{r default-model}
+Pima.te$type <- factor(Pima.te$type)
+
+Pima.te$type_numeric <- as.numeric(Pima.te$type == "Yes")
+
+cor_matrix <- cor(Pima.te[, sapply(Pima.te, is.numeric)], use = "complete.obs")
+
+corrplot(cor_matrix, method = "color", type = "upper", 
+         addCoef.col = "black", tl.cex = 0.8, number.cex = 0.7)
+
+# default_mod
+default_mod <- lm(glu ~ (npreg + bp + skin + bmi + ped + age) * type, data = Pima.te)
+summary(default_mod)
+AIC(default_mod)
+
+```
+
+Výchozí model zahrnuje všechny hlavní efekty a interakce s proměnnou `type`. Signifikantní jsou `ped` a `typeYes`, většina interakcí není významná, a proto je možné dále vynechat. Model vysvětluje \~32 % variability glukózy, průměrná chyba predikce je 25,6 a AIC je 3109,98. Z výše uvedených důvodů je model dále zjednodušen krokovou regresí.
+
+```{r step-regression}
+step_mod <- step(default_mod, direction = "both", trace = FALSE)
+summary(step_mod)
+AIC(step_mod)
+
+```
+
+Kroková regrese automaticky přidává nebo odstraňuje proměnné a interakce, aby minimalizovala AIC. `direction="both"` umožňuje přidávání i odebírání, `trace=FALSE` skryje průběh. `summary(step_mod)` ukazuje koeficienty a významnost, `AIC(step_mod)` hodnotu AIC. Tento postup hledá optimální model před zjednodušováním.
+
+Výstup ukazuje regresí vybraný model: hlavní efekty `npreg`, `bp`, `skin`, `ped`, `age`, `type` a dvě interakce (`skin:type`, `ped:type`). Signifikantní jsou `npreg`, `skin`, `ped`, `age` a `typeYes`; interakce nejsou. Model vysvětluje \~32 % variability glukózy, průměrná chyba predikce je 25,4, AIC = 3100,9. Kvůli nevýznamnosti vybraných prediktorů je model dále zjednodušen a porovnán s vybraným modelem pro zachování přesnosti.
+
+### Zjednodušování modelu
+
+```{r model-simplification}
+simplified_mod <- lm(glu ~ npreg + skin + ped + age + type, data = Pima.te)
+summary(simplified_mod)
+AIC(simplified_mod)
+```
+
+Tento model je zjednodušená verze automaticky vybraného modelu, která zahrnuje pouze hlavní efekty `npreg`, `skin`, `ped`, `age` a `type`. Signifikantní jsou `npreg`, `skin`, `age` a `typeYes`; `ped` je na hranici významnosti. Model vysvětluje \~31 % variability glukózy, průměrná chyba predikce je 25,5 a AIC je 3101,5. Výkonnost tohoto modelu je oproti automatickému modelu mírně horší, ale stále srovnatelná a model je jednodušší a interpretovatelnější. Proměnná `ped` je mírně nad hranicí významnosti. Model je tedy dále zjednodušen a prozkoumán, zda i při dalším zjednodušení zachová přesnost.
+
+```{r model-simplification-2}
+simplified_mod2 <- lm(glu ~ npreg + skin + age + type, data = Pima.te)
+summary(simplified_mod2)
+AIC(simplified_mod2)
+```
+Tento model je zjednodušenější verze, ve které byla odstraněna proměnná `ped`. Signifikantní zůstávají `npreg`, `skin`, `age` a `typeYes`. Model vysvětluje ~30 % variability glukózy, průměrná chyba predikce je 25,6 a AIC je 3103,1. Výkonnost modelu je znovu mírně zhoršena, ale model je jednodušší a interpretovatelnější při minimální ztrátě výkonu. Všechny prediktory jsou navíc významné.
+
+```{r model-comparison}
+anova(step_mod, simplified_mod, simplified_mod2)
+```
+
+Porovnání ukazuje, že zjednodušení z automatického modelu na Model 2 (bez `bp` a interakcí) statisticky významně nezhoršuje fit (p = 0,091), zatímco další odstranění `ped` v Modelu 3 je na hranici významnosti (p = 0,058). AIC i F-testy naznačují, že Model 2 je nejlepší kompromis mezi jednoduchostí a vysvětlovanou variabilitou. Výběr výsledného modelu záleží na tom, co je preferována vlastnost modelu. Dále je pracováno s nejjednodušší verzí.
+
+### Test předpokladů 
+
+```{r diagnostics}
+mod <- simplified_mod
+
+par(mfrow = c(2, 2))
+plot(mod)
+par(mfrow = c(1, 1))
+
+# Normalita
+shapiro.test(residuals(mod))
+
+# Homoskedasticita
+bptest(mod)
+
+# Multikolinearita
+if(length(coef(mod)) > 2) {
+  vif(mod)
+}
+```
+
+Z výše uvedených grafů výplývá že:
+  1. linearita závislostí nemá viditelný trend a je tedy v pořádku,
+  2. rezidua leží na přímce a mají normální rozdělení,
+  3. rozptyl má mírně stoupající trend a může být problémový, a
+  4. žádné pozorování významně model neovlivňuje a všechna pozorovnání jsou v mezích Cooksovy křivky.
+  
+Pravdivost těchto tvrzení je ověřena také výpočtem. Číselná diagnostika ukazuje, že předpoklady lineární regrese jsou částečně porušeny. Shapiro-Wilk test indikuje, že rezidua nejsou přesně normálně rozložena (p = 0,0065 < 0,05). Test Breusche-Pagana potvrzuje heteroskedasticitu (p < 0,001), tedy že rozptyl reziduí není konstantní. Kontrola multikolinearity pomocí VIF ukazuje, že hodnoty jsou nízké (< 2), takže silná kolinearita mezi prediktory nehrozí. Na základě těchto zjištění je přistoupeno k transformaci závislé proměnné.
+
+### Log transformace
+
+```{r}
+ln.glu <- log(Pima.te$glu)
+
+mod <- lm(ln.glu ~ npreg + skin + age + type, data = Pima.te)
+summary(mod)
+AIC(mod)
+```
+
+### Test předpokladů po transformaci
+
+```{r}
+par(mfrow = c(2,2))
+plot(mod)
+par(mfrow = c(1,1))
+
+# Homoskedasticita
+bptest(mod)
+
+# Normalita
+shapiro.test(residuals(mod))
+
+# Multikolinearita
+vif(mod)
+
+# Vlivná pozorování
+cd <- cooks.distance(mod)
+which(cd > 4/length(cd))
+```
+
+Diagnostika po logaritmické transformaci proměnné `glu` ukazuje výrazné zlepšení heteroskedasticity: Breusch-Pagan test je nyní nevýznamný (p = 0,102), takže rozptyl reziduí lze považovat za přibližně konstantní. Rezidua stále vykazují mírnou odchylku od normality (Shapiro-Wilk p = 0,045), což je spíše upozornění než kritický problém. VIF ukazují nízkou až mírnou kolinearitu mezi prediktory (< 2). Cooksovy vzdálenosti odhalily několik potenciálně vlivných pozorování (řádky 4, 17, 18, 57, 72, 91, 96, 106, 192, 217, 228, 239, 291, 315, 320), která mohou mít větší dopad na odhad koeficientů. Celkově model splňuje hlavní předpoklady lineární regrese relativně dobře.
+
+### Hodnocení kvality modelu
+
+```{r model-quality}
+# R², AIC a anova
+summary(mod)$r.squared
+summary(mod)$adj.r.squared
+AIC(mod)
+
+Anova(mod, type = "II")
+```
+
+Model vysvětluje přibližně 28–29 % variability logaritmu glukózy (R² = 0,288, Adjusted R² = 0,279) a má AIC = −86,45. ANOVA typu II ukazuje, že všechny zahrnuté proměnné jsou statisticky významné, přičemž největší vliv má type, následovaný age, npreg a skin. Model je tedy sice relativně jednoduchý, ale všechny prediktory přispívají k vysvětlení variability glukózy.
+
+### Interpretace regresních koeficientů v původní škále
+
+```{r}
+# Koeficienty a jejich CI pro log(glu)
+coef_log <- summary(mod)$coefficients
+ci_log <- confint(mod)
+
+# Exponenciace pro převod zpět na glu
+coef_glu <- exp(coef_log[, "Estimate"])
+ci_glu <- exp(ci_log)
+
+# Výpis výsledků
+coef_glu
+ci_glu
+```
+
+Výsledky ukazují odhadnuté multiplikativní efekty prediktorů na původní hladinu glukózy: Intercept 88,65 odpovídá očekávané glukóze pro referenční skupinu (nediabetičky, ostatní proměnné na nule). Každé další těhotenství (`npreg`) snižuje glukózu přibližně o 1,2 % (0,988), tloušťka kožní řasy (`skin`) zvyšuje glukózu o ~0,3 % (1,003) a každý rok věku přidává ~0,46 % (1,0046). Ženy s diabetem (`typeYes`) mají glukózu v průměru o ~27 % vyšší (1,271). Intervaly spolehlivosti potvrzují, že tyto efekty jsou statisticky významné, kromě velmi malých efektů `npreg`, `skin` a `age`, kde CI téměř zahrnuje 1.
+
+### Predikce s intervalem spolehlivosti
+
+```{r prediction}
+# průměrné hodnoty
+avg_values <- sapply(Pima.te[, c("bp", "skin", "ped")], mean, na.rm = TRUE)
+
+new_woman <- data.frame(
+  type = "Yes",
+  age = 35,
+  npreg = 4,
+  bmi = 26.1,
+  bp = avg_values["bp"],
+  skin = avg_values["skin"],
+  ped = avg_values["ped"]
+)
+
+print("Odhad modelu pro novou ženu:")
+print(new_woman)
+
+# predikce s 95% CI (střední hodnota)
+prediction_log <- predict(mod, new_woman, interval = "confidence", level = 0.95)
+prediction_glu <- exp(prediction_log)  # převod zpět na mg/dL
+print("Odhadnutá hladina glukózy v krvi s intervalem spolehlivosti 95 % (mg/dL):")
+print(prediction_glu)
+
+# Individuální predikce s 95% PI
+pred_interval_log <- predict(mod, new_woman, interval = "prediction", level = 0.95)
+pred_interval_glu <- exp(pred_interval_log)
+print("Individuální odhad s 95% intervalem spolehlivosti (mg/dL):")
+print(pred_interval_glu)
+```
+
+Výsledky ukazují, že pro ženu s diabetem (type = Yes), 35 let, po 4 těhotenstvích, BMI 26,1 a průměrnými hodnotami ostatních ukazatelů odhaduje model hladinu glukózy ~137 mg/dL.
+
+95 % interval spolehlivosti pro střední hodnotu je 132–143 mg/dL, což odhaduje průměrnou glukózu pro ženy se stejnými charakteristikami.
+
+95 % individuální interval je 91–208 mg/dL, což ukazuje, kam by mohla spadat skutečná hodnota glukózy u konkrétní ženy, a je širší, protože zahrnuje variabilitu jednotlivých měření.
+
+## Shrnutí
+
+```{r summary}
+### Shrnutí finálního modelu
+mod_formula <- formula(mod)
+
+cat("Výsledný model:\n")
+print(mod_formula)
+
+cat("\nKvalita modelu:\n")
+cat("R²:", round(summary(mod)$r.squared, 4), "\n")
+cat("Adjusted R²:", round(summary(mod)$adj.r.squared, 4), "\n")
+cat("AIC:", round(AIC(mod), 2), "\n")
+
+cat("\nPredikce pro danou ženu:\n")
+cat("Předvídaná hladina glukózy:", round(prediction_glu[1, "fit"], 1), "mg/dL\n")
+cat("95% interval spolehlivosti: [", 
+    round(prediction_glu[1, "lwr"], 1), ",", 
+    round(prediction_glu[1, "upr"], 1), "] mg/dL\n")
+
+```
+
+Celý sešit představuje kompletní analýzu faktorů ovlivňujících hladinu glukózy v krvi u žen z datasetu Pima.te. Hlavní kroky a interpretace jsou následující:
+
+Nejprve byly načteny potřebné knihovny a data, prozkoumána struktura datasetu a základní statistiky proměnných. Zjištěno bylo, že glukóza, věk, počet těhotenství, tloušťka kožní řasy, BMI, krevní tlak a diabetes typ jsou proměnné vhodné pro regresní analýzu.
+
+Následovala příprava dat pro modelování: proměnná `type` byla převedena na faktor a zároveň byla vytvořena numerická verze `type_numeric` pro korelační analýzu. Korelační matice ukázala mírné vztahy mezi proměnnými, což poskytlo přehled o potenciálních prediktorech.
+
+Výchozí lineární model (`default_mod`) zahrnoval všechny hlavní efekty a jejich interakce s proměnnou `type`. Výsledky ukázaly, že interakce nebyly statisticky významné a model měl relativně nízké R² (~32 %), což je typické pro biologická data s vysokou variabilitou. K porovnávání modelů sloužilo AIC.
+
+Kroková regresní analýza (`stepwise regression`) umožnila zjednodušit model a odstranit nepotřebné prediktory. Postupně vznikly dva zjednodušené modely. Porovnání pomocí ANOVA ukázalo, že odstranění některých prediktorů a interakcí nezpůsobilo statisticky významnou ztrátu vysvětlené variability, takže bylo možné udržet nejjednodušší model.
+
+Finální model zahrnuje pouze proměnné **npreg**, **skin**, **age** a **type** a vysvětluje ~28–29 % variability log(glukózy). Diagnostika modelu ukázala přijatelnou normalitu a homoskedasticitu reziduí, nízkou kolinearitu a několik vlivných pozorování, která by mohla mírně ovlivnit odhady.
+
+Koeficienty modelu byly interpretovány na logaritmované škále i po exponencování zpět na původní hladinu glukózy. Například každé další těhotenství mírně snižuje glukózu, vyšší věk a tloušťka kožní řasy glukózu zvyšují, a ženy s diabetem mají glukózu přibližně o 27 % vyšší než nediabetičky.
+
+Predikce pro konkrétní ženu (diabetička, 35 let, 4 těhotenství, BMI 26,1, ostatní ukazatele průměrné) odhadla glukózu ~137 mg/dL s 95 % intervalem spolehlivosti 132–143 mg/dL pro střední hodnotu. Individuální interval pro konkrétní měření by byl širší, protože zohledňuje variabilitu mezi jednotlivci.
+
+Shrnutí:
+Sešit ukazuje kompletní workflow lineární regrese: průzkum dat, tvorbu modelu s interakcemi, krokovou regresi, diagnostiku předpokladů, interpretaci koeficientů a predikci s intervaly spolehlivosti. Výsledky dávají smysl biologicky i statisticky a umožňují konkrétně odhadovat hladinu glukózy u žen s různými charakteristikami.
+
+Celkově je model jednoduchý, interpretovatelný a vhodný pro praktické odhady, i když vysvětluje jen část variability glukózy, což je typické pro data z reálných klinických studií.

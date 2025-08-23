@@ -1,0 +1,199 @@
+---
+title: "Žadatelé o azyl v Kanadě"
+author: "Martin Žoha"
+date: "2025-08-17"
+output: 
+  html_document:
+    theme: flatly
+    toc: yes
+    toc_float:
+      collapsed: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+## Zadání
+
+Použijte databázi Greene z knihovny carData. Data pojednávají o neúspěšných žadatelích o azyl v Kanadě, kteří žádají o možnost odvolat se proti zamítnutí azylu. Zjistěte, na čem závisí, jestli jim odvolání bylo umožněno. Pracujte pouze s kategorickými proměnnými a závisle proměnnou "decision". Zvolte vhodnou regresní metodu, najděte optimální model a interpretujte vybrané regresní koeficienty (max 5). Je lépe pracovat se všemi zeměmi individuálně, nebo byste země s malým počtem žadatelů spojily? Navrhněte vhodné spojení zemí a porovnejte s původním modelem. Jak si stojí žadatelé z Československa?
+
+---
+
+## Postup
+
+### Načtení a průzkum dat
+
+```{r include=FALSE}
+library(carData)
+library(car)
+library(fmsb)
+library(MASS)
+library(lmtest)
+```
+
+```{r}
+data("Greene")
+str(Greene)
+summary(Greene)
+```
+
+Datová sada obsahuje 384 případů odvolání, kde hlavními prediktory jsou jméno soudce, původ žadatele, doporučení hodnotitele, jazyk a místo řízení. Přibližně dvě třetiny žádostí byly zamítnuty (270 „no“ vs. 114 „yes“). Nejvíce případů pocházelo z Libanonu, Číny a Srí Lanky. Mezi soudci má největší zastoupení MacGuigan a Hugessen, přičemž počty rozhodnutí se mezi nimi liší. Hodnotitel častěji doporučil „no“ než „yes“. Většina případů byla slyšena v Torontu, menší část v Montrealu nebo jinde. Proměnná `success` je spojitý index, který má negativní průměr a ukazuje, že obecně byla úspěšnost nízká.
+
+Datová sada je očištěna o tuto numerickou proměnnou a dále je pracováno pouze s kategorickými sloupci.
+
+```{r}
+# ponecháme jen kategorické proměnné + decision
+categoricals <- names(Greene)[sapply(Greene, is.factor)]
+dat <- Greene[, categoricals]
+head(dat)
+```
+
+```{r}
+# závislá proměnná: decision (yes=1, no=0)
+dat$decision_bin <- (dat$decision == "yes")
+
+# crosstables
+predictors <- c("judge", "nation", "rater", "language", "location")
+for(var in predictors) {
+ cat("\n", toupper(var), "\n", rep("-", 20), "\n")
+ print(table(dat$decision_bin, dat[[var]]))
+}
+```
+
+Rozložení ukazuje, že mezi soudci se výrazně liší podíl kladných rozhodnutí, například Marceau rozhodoval „yes“ častěji než ostatní, zatímco u Hugessena či Desjardinse převažovala zamítnutí. U národností se potvrzuje rozdílná úspěšnost – žadatelé z ČSSR či Srí Lanky měli relativně vysoký podíl povolení, zatímco z Bulharska, Íránu či Nigérie převažovala zamítnutí. Doporučení ratera má zásadní vliv – při „yes“ byla úspěšnost rozhodnutí vyrovnanější než při „no“, kde zamítnutí jasně dominovalo. Jazykově byla vyšší pravděpodobnost povolení při jednání v angličtině než ve francouzštině. Lokalita rovněž hraje roli – v Torontu a zejména v Montrealu převažovala zamítnutí, zatímco v menší skupině případů „other“ byl poměr rozhodnutí vyrovnanější.
+
+### Vytvoření výchozího modelu
+
+```{r}
+# základní model se všemi kategoriálními proměnnými  
+mod_full <- glm(decision_bin ~ . - decision, family = binomial, data = dat)
+summary(mod_full)
+
+Anova(mod_full, type="II")
+
+NagelkerkeR2(mod_full)
+```
+
+Výchozí model obsahuje všechny proměnné, ale významné jsou dle výsledků anova pouze `judge`, `nation` a `rater`. Model vysvětluje ~ 41 % variability.
+
+### Zjednodušení modelu
+
+Ke zjednodušení modelu je využita kroková regrese nejdříve podle AIC a následně BIC. Modely upřednostňující AIC bývají složitější, ale lépe vysvětlují variabilitu. BIC preferuje jednodušší modely, které se lépe interpretují, ale mohou ztrácet na přesnosti. Výkonnost obou modelů je srovnána pomocí AIC, BIC a v potaz je bráno také Nagelkerkerho R².
+
+```{r}
+# kroková regrese podle AIC
+mod_step_aic <- step(mod_full, direction = "both", trace = FALSE)
+summary(mod_step_aic)
+
+Anova(mod_step_aic, type="II")
+
+NagelkerkeR2(mod_step_aic)
+```
+
+```{r}
+# kroková regrese podle BIC
+k <- log(length(dat$decision_bin))
+mod_step_bic <- step(mod_full, direction = "both", trace = FALSE, k = k)
+summary(mod_step_bic)
+
+Anova(mod_step_bic, type="II")
+
+NagelkerkeR2(mod_step_bic)
+```
+
+```{r}
+AIC(mod_full, mod_step_aic, mod_step_bic)
+BIC(mod_full, mod_step_aic, mod_step_bic)
+```
+
+Model zjednodušený podle AIC obsahuje prediktory `judge`, `nation`, `rater` a `location`. Všechny prediktory jsou významné. Stejně jako výchozí model vysvětluje ~ 41 % variability. AIC a BIC je oproti výchozímu modelu mírně nižší.
+
+Model vybraný optimalizací podle BIC obsahuje jediný prediktor, kterým je `rater``. Tento model je výrazně jednodušší, ovšem vysvětluje pouze ~ 10 % variability. Díky své jednoduchosti má nejnižší BIC, ale AIC je významně vyšší než zbylé dva modely.
+
+Z výše uvedených důvodů je vybrán optimální model `mod_step_aic` a dále je pracováno s tímto modelem.
+
+```{r}
+coefs_aic <- coef(mod_step_aic)
+exp(cbind(OR = coefs_aic, confint(mod_step_aic)))
+```
+
+Model ukazuje, že na výsledek rozhodnutí mají nejsilnější vliv konkrétní soudci, doporučení hodnotitele a lokalita. Někteří soudci (např. Hugessen, Heald, Stone, Pratte, Iacobucci) mají výrazně nižší šanci udělit kladné rozhodnutí oproti referenčnímu, zatímco Marceau je naopak spojen s několikanásobně vyšší pravděpodobností souhlasu. Doporučení „yes“ od hodnotitele více než čtyřnásobně zvyšuje pravděpodobnost kladného rozhodnutí a také Toronto či jiné lokality než Montreal zvyšují šanci žadatele oproti Montrealu. Národnostní efekty jsou méně stabilní, s velkými intervaly spolehlivosti a někdy i numerickými problémy (extrémní hodnoty pro Indii, Fiji nebo Polsko), což naznačuje nedostatek dat v těchto kategoriích. Pouze Czechoslovakia má statisticky významný a velmi silný pozitivní efekt, odpovídající mnohem vyšší míře úspěšnosti než je průměr, ovšem i zde je interval spolehlivosti velmi široký.
+
+```{r}
+sort(table(dat$nation))
+```
+
+Kvůli problémům s nedostatkem pozorování pro vybrané lokality je přistoupeno k jejich slučování do kategorie ostatních (`Other`). Tím je omezen vliv těchto lokalit na výsledný model. Do sloučené kategorie jsou přidány všechny lokality, které mají méně než 20 případů.
+
+```{r}
+tab_nat <- table(dat$nation)
+small_countries <- names(tab_nat[tab_nat < 20])
+
+dat$nat_grouped <- as.character(dat$nation)
+dat$nat_grouped[dat$nat_grouped %in% small_countries] <- "Other"
+dat$nat_grouped <- factor(dat$nat_grouped)
+
+table(dat$nat_grouped)
+```
+
+### Vytvoření modelu po sloučení vybraných lokalit
+
+Po úpravě datové sady sloučením lokalit s nízkým počtem pozorování je zopakován výše uvedený postup s vytvářením výchozího modelu a jeho následným zjednodušením. Kritéria pro zjednodušení a výběr modelu jsou zachována.
+
+```{r}
+mod_grouped <- glm(decision_bin ~ . - decision - nation, family = binomial, data = dat)
+summary(mod_grouped)
+
+Anova(mod_grouped, type="II")
+
+NagelkerkeR2(mod_grouped)
+```
+
+```{r}
+# kroková regrese podle AIC
+mod_step_gaic <- step(mod_grouped, direction = "both", trace = FALSE)
+summary(mod_step_gaic)
+
+Anova(mod_step_gaic, type="II")
+
+NagelkerkeR2(mod_step_gaic)
+
+# kroková regrese podle BIC
+mod_step_gbic <- step(mod_grouped, direction = "both", trace = FALSE, k = k)
+summary(mod_step_gbic)
+
+Anova(mod_step_bic, type="II")
+
+NagelkerkeR2(mod_step_gbic)
+
+AIC(mod_grouped, mod_step_gaic, mod_step_gbic)
+BIC(mod_grouped, mod_step_gaic, mod_step_gbic)
+```
+
+Stejně jako v případě datové sady s rozdělenými lokalitami je i zde vybrán model vybraný krokovou regresí na základě AIC kritéria. Na této datové sadě je vysvětleno ~ 36,5 % variability. Model obsahuje prediktory `judge`, `rater`, `location`a `nat_grouped`.
+
+```{r}
+coefs_gaic <- coef(mod_step_gaic)
+exp(cbind(OR = coefs_gaic, confint(mod_step_gaic)))
+```
+
+Tento model ukazuje, že pravděpodobnost kladného rozhodnutí je silně ovlivněna konkrétním soudcem, doporučením hodnotitele a lokalitou řízení. Někteří soudci (Heald, Hugessen, Iacobucci, MacGuigan, Pratte, Stone) mají výrazně nižší šanci udělit souhlas než referenční soudce, zatímco Marceau rozhoduje častěji pozitivně. Doporučení „yes“ od hodnotitele více než čtyřnásobně zvyšuje šanci na úspěch a lokalita mimo Montreal je také spojena s vyšší pravděpodobností kladného rozhodnutí. Z národností jednoznačně vyčnívá Czechoslovakia, která má více než třicetinásobnou šanci uspět oproti referenci, ale i zde je interval spolehlivosti velmi široký. Ostatní skupiny národností mají odhady blízké jedné a široké intervaly spolehlivosti, což naznačuje nejisté nebo nevýrazné efekty. Jedničku obsahují také intervaly spolehlivosti u soudcí Mahoney a Urie.
+
+### Posouzení šancí žadatelů z Československa
+
+```{r}
+cs_data <- subset(dat, nation == "Czechoslovakia")
+mean(cs_data$decision_bin)
+mean(dat$decision_bin)
+
+1/exp(coefs_gaic["nat_groupedCzechoslovakia"])
+```
+
+Žadatelé z Československa získali kladné rozhodnutí ve dvou třetinách případů, zatímco celkový průměr je necelých 30 %. Odhadovaný poměr šancí ukazuje, že ve srovnání s referenční skupinou mají více než třicetinásobně vyšší pravděpodobnost úspěchu. Hodnota inverze (≈0,03) potvrzuje, že pravděpodobnost neúspěchu je u této skupiny jen zlomek oproti ostatním.
+
+---
+
+## Závěr
+
+Analýza ukazuje, že výsledky rozhodování jsou ovlivněny jak soudci, tak charakteristikami žadatelů. Rozhodování o povolení žádosti odvolat se proti zamítnutí žádosti o azyl tak nebylo zcela objektivní. Práce se všemi zeměmi individuálně vede k nestabilním odhadům, protože mnoho kategorií má velmi malý počet pozorování. Seskupení zemí s malým počtem žadatelů do kategorie "Other" se proto ukazuje jako vhodnější postup, který zvyšuje stabilitu modelu a umožňuje interpretovat výsledky spolehlivěji. Žadatelé z Československa dosahují výrazně vyšší úspěšnosti než ostatní skupiny, což potvrzuje jak deskriptivní statistika, tak výsledky regresního modelu. Model i datová sada mají ovšem svá omezení. Některé země zůstávají zastoupeny jen minimálně, intervaly spolehlivosti u mnoha odhadů jsou široké a výsledky jsou citlivé na volbu modelovací strategie. Tyto faktory je nutné brát v úvahu při interpretaci závěrů.

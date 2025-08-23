@@ -1,0 +1,244 @@
+---
+title: "Měsíční počet zemřelých na silnicích"
+author: "Martin Žoha"
+date: "2025-08-17"
+output: 
+  html_document:
+    theme: flatly
+    toc: yes
+    toc_float:
+      collapsed: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+## Zadání
+
+Použijte data "road" z knihovny MASS a spočítejte na čem závisí měsíční počet zemřelých na silnicích. Zvolte vhodnou regresní metodu, nalezněte optimální model, ověřte předpoklady a interpretujte vypočtené regresní koeficienty.
+
+## Postup
+
+### Načtení knihoven
+
+```{r libraries}
+library(MASS)
+library(car)
+library(lmtest)
+library(DescTools)
+library(corrplot)
+```
+
+### Prohlídka dat
+
+```{r}
+# Load the road data
+data("road")
+head(road)
+str(road)
+summary(road)
+```
+
+Jedná se o data o ročním počtu úmrtí při dopravních nehodách ve vybraných státech USA. Datová sada obsahuje 26 pozorování o 6 proměnných.
+
+### Nastavení proměnných z dataframe
+
+Jednotlivé proměnné jsou extrahovány z datové sady pro lepší práci a okamžité pochopení a deskriptivní pojmenování.
+
+```{r}
+pocet_umrti <- road$deaths      # počet úmrtí
+pocet_ridicu <- road$drivers    # Počet řidičů v 10 000
+hustota_osidleni <- road$popden # Hustota osídlení v obyvatelích/čtvereční míli
+delka_silnic <- road$rural      # Délka silnic mimo město v tis. mílích
+prumerna_teplota <- road$temp   # Průměrná nejvyšší denní teplota v lednu
+spotreba_paliva <- road$fuel    # Spotřeba paliva v desetimil. US galonů/rok
+```
+
+### Jednotlivé dílčí grafy
+
+Vztah závislé proměnné (počet úmrtí) k jednotlivým nezávislým proměnným k závislé proměnné je vizualizován pomocí dílčích grafů pro lepší pochopení.
+
+```{r}
+par(mfrow = c(2, 3))
+
+nezavisle_promenne <- list(pocet_ridicu, hustota_osidleni, delka_silnic, prumerna_teplota, spotreba_paliva)
+var_labels <- c("Počet řidičů (v 10 000)", 
+                "Hustota osídlení (obyv./míle²)",
+                "Délka silnic mimo město (tis. mílí)",
+                "Průměrná teplota v lednu",
+                "Spotřeba paliva (mil. galonů/rok)")
+
+# Create plots for each variable
+for (i in 1:length(nezavisle_promenne)) {
+  x_var <- nezavisle_promenne[[i]]
+  
+  plot(x_var, pocet_umrti, 
+       pch = 19, 
+       col = "blue",
+       xlab = var_labels[i], 
+       ylab = "Počet úmrtí",
+       main = paste("Závislost úmrtí na:", var_labels[i]))
+  
+  # Add regression line
+  abline(lm(pocet_umrti ~ x_var), col = "red", lwd = 2)
+  
+  # Add state labels
+  text(x_var, pocet_umrti, labels = rownames(road), pos = 3, cex = 0.6)
+  
+  # Print correlation coefficient for each variable
+  cat("Korelace mezi", var_labels[i], "a počtem úmrtí:", 
+      round(cor(x_var, pocet_umrti), 3), "\n")
+}
+
+# Reset plotting parameters
+par(mfrow = c(1, 1))
+```
+
+### Počáteční model
+
+Je vytvořen počáteční model lineární regrese obsahující interakci všech proměnných. Předpokladem je, že tento model nebude nejvhodější a slouží jako základ pro další úpravy.
+
+```{r}
+default_model <- lm(pocet_umrti ~ pocet_ridicu *
+                      delka_silnic *
+                      prumerna_teplota *
+                      spotreba_paliva)
+summary(default_model)
+```
+Dle předpokladů jsou jednotlivé prediktory nevýznamné a model je příliš komplikovaný pro následnou interpretaci. Je potřeba přistoupit k jeho postupnému zjednodušení.
+
+### Kroková regrese
+
+```{r}
+step_model <- step(lm(pocet_umrti ~ pocet_ridicu * delka_silnic *
+                        prumerna_teplota * spotreba_paliva))
+summary(step_model)
+```
+Funkce `step()`automaticky daný model zjednodušuje a optimalizuje odebíráním nevýznamných prediktorů. Přestože tento je již jednodušší, dosahuje srovnatelných výsledků jako model výchozí.
+
+```{r}
+AIC(step_model)
+```
+
+### Kroková regrese BIC
+
+Kromě automatické regrese dle AIC je zde vyzkoušena optimalizace pomocí BIC, která může vést k lepší výsledkům.
+
+```{r}
+steps <- length(pocet_umrti)
+step_model_bic <- step(lm(pocet_umrti ~ pocet_ridicu * delka_silnic *
+                        prumerna_teplota * spotreba_paliva), k=log(steps))
+summary(step_model_bic)
+AIC(step_model_bic)
+```
+Zde i druhá automatická metoda dochází k identickým závěrům. Přesto je model možné dále zjednodušit manuálně.
+
+### Zjednodušení modelu
+
+```{r}
+simple_model <- lm(pocet_umrti ~ pocet_ridicu +
+                     spotreba_paliva +
+                     pocet_ridicu:delka_silnic +
+                     delka_silnic:spotreba_paliva)
+summary(simple_model)
+AIC(simple_model)
+```
+Výsledný model je jednodušší, všechny prediktory jsou významné a dosahuje obdobných výsledků jako předchozí komplikovanější modely.
+
+### Test předpokladů
+
+```{r}
+par(mfrow = c(2, 2))
+plot(simple_model)
+par(mfrow = c(1, 1))
+```
+Ze všech grafů vyplývá, že předpoklady normality, homoskedasticity a multikolinearity jsou převážně splněny. Problematické může být pozorování 19. Dále může být model ovlivněn pozorováním 5, které se nachází mimo Cooksovu křivku.
+Předpoklady jsou ověřeny výpočtem.
+
+```{r}
+shapiro.test(residuals(simple_model)) # Normalita
+bptest(simple_model)                  # Homoskedasticita
+vif(simple_model)                     # Multikolinearita
+```
+Nulová hypotéza, že rezidua mají normální rozdělení je zamítnuta, protože p-hodnota je < 0,05. Naproti tomu předpoklad homoskedasticity reziduí je splněn. P-hodnota je > 0,05 a nulová hypotéza je zamítnuta. Mezi prediktory je silná multikolinearita. Předpoklady nejsou splněny a model je potřeba dále upravovat.
+
+### Nesplněné předpoklady - transformace závislé proměnné
+
+Výše uvedené kroky s vytvořením výchozího modelu a následné krokové regresy jsou opakovány, ale závislá proměnná je nyní transformována pomocí logaritmické funkce
+
+```{r}
+pocet_umrti_transform <- log(pocet_umrti)
+model_log <- lm(pocet_umrti_transform ~ pocet_ridicu *
+                      delka_silnic *
+                      prumerna_teplota *
+                      spotreba_paliva)
+summary(model_log)
+```
+```{r}
+step_model_log <- step(model_log)
+summary(step_model_log)
+```
+
+```{r}
+par(mfrow = c(2, 2))
+plot(step_model_log)
+par(mfrow = c(1, 1))
+## normalita: H0: normalni rozdeleni vs. H1: neni normalni rozdeleni
+shapiro.test(residuals(step_model_log))
+```
+Výsledný model je složitější a dosahuje horších výsledků. Navíc předpoklad normality je znovu nesplněn s ještě horším výsledkem. Dle grafického znázornění může tuto chybu znovu způsobovat pozorování 19. Toto pozorování je tedy odebráno.
+
+```{r}
+simple_model_reduced <- lm(deaths ~ drivers +
+                     fuel +
+                     drivers:rural +
+                     rural:fuel, data=road[-19, ])
+summary(simple_model_reduced)
+```
+Model je nyní jednodušší, všechny prediktory jsou velmi významné a model dosahuje lepších výsledků.
+
+```{r}
+par(mfrow = c(2, 2))
+plot(simple_model_reduced)
+par(mfrow = c(1, 1))
+```
+Z grafů vyplývá, že předpoklady mohou být splněny. Mimo vymezené pole Cooksovy křivky se nachází pozorování ze státu California, které má na výsledný model významný vliv.
+
+```{r}
+shapiro.test(residuals(simple_model_reduced)) # Normalita
+bptest(simple_model_reduced)                  # Homoskedasticita
+vif(simple_model_reduced)                     # Multikolinearita
+```
+
+P-hodnota je výrazně vyšší než 0.05, což znamená, že nelze zamítnout nulovou hypotézu o normálním rozdělení reziduí. Rezidua tedy lze považovat za normálně rozložená. U testu homoskedasticity je P-hodnota vyšší než 0.05, což znamená, že není statisticky významný důkaz o heteroskedasticitě a i tento předpoklad je splněn. Multikolinearita je ovšem stále silná a je potřeba ji dále řešit.
+
+Proměnné jsou škálovány a centrovány. Model je použit výsledný zjednodušený.
+
+```{r}
+road$drivers_c <- scale(road$drivers, center = TRUE, scale = FALSE)
+road$fuel_c    <- scale(road$fuel, center = TRUE, scale = FALSE)
+road$rural_c   <- scale(road$rural, center = TRUE, scale = FALSE)
+
+simple_model_centered <- lm(deaths ~ drivers_c + fuel_c +
+                              drivers_c:rural_c + fuel_c:rural_c,
+                            data = road[-19, ])
+vif(simple_model_centered)
+
+```
+
+Hodnoty VIF klesly, přesto jsou stále vysoké a značí multikolinearitu. Model je vhodný k predikcím.
+
+```{r}
+summary(simple_model_centered)
+```
+
+```{r}
+final_model <- lm(deaths ~ fuel_c +
+                    drivers_c:rural_c +
+                    fuel_c:rural_c,
+                  data = road[-19, ])
+summary(final_model)
+```
+
+Výsledný model vysvětluje velmi dobře variabilitu počtu úmrtí (Adjusted R² = 0,9583). Spotřeba paliva (fuel_c) má pozitivní a statisticky významný vliv na počet úmrtí, což znamená, že čím více se jezdí, tím je větší počet smrtelných dopravních nehod. Interakce počtu řidičů s délkou silnic (drivers_c:rural_c) také pozitivně ovlivňuje počet úmrtí. Více řidičů využívá dopravní infrastrukturu. Zatímco interakce spotřeby paliva s délkou silnic (fuel_c:rural_c) má negativní vliv. Všechny tyto koeficienty jsou statisticky velmi významné (p < 0,001). Model má nízkou reziduální chybu (197.1), což potvrzuje jeho dobrou predikční schopnost. 
