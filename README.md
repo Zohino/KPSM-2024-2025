@@ -2,6 +2,8 @@
 
 Zpracované datové sady a generované grafy nejsou v repozitáži přiloženy. Pro stažení datových sad a generování a ukládání grafů spusťte jednotlivé sešity.
 
+> Úlohy zpracované v R jsou přiloženy také v .html formátu a není potřeba sešity znovu spouštět.
+
 ## Python (prof. Sergii Babichev, DSc.)
 
 ### Regression 1
@@ -24,4 +26,4 @@ Zpracované úlohy naleznete ve složce [fuzzy](./fuzzy/ "Zpracovaná úloha na 
 
 ## R (Mgr. Alena Černíková, MSc., Ph.D.)
 
-[WIP](./regression_R/)
+Zpracované úlohy na regrese v R naleznete ve složce [regression_R](./regression_R/ "Zpracované úlohy na regrese v R"). 
