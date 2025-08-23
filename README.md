@@ -27,3 +27,5 @@ Zpracované úlohy naleznete ve složce [fuzzy](./fuzzy/ "Zpracovaná úloha na 
 ## R (Mgr. Alena Černíková, MSc., Ph.D.)
 
 Zpracované úlohy na regrese v R naleznete ve složce [regression_R](./regression_R/ "Zpracované úlohy na regrese v R"). 
+
+Zpracovanou úlohu na mnohorozměrné statistické metody naleznete ve složce [mnohorozmerne](./mnohorozmerne/ "Mnohorozměrné statistické metody - Vína")
