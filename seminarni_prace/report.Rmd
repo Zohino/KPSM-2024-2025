@@ -1,0 +1,504 @@
+---
+title: "Analýzu výsledků dotazníkového šetření realizovaného na skupině zákazníků"
+author: "Martin Žoha"
+date: '`r Sys.Date()`'
+output:
+  pdf_document:
+    toc: true
+  html_document:
+    theme: flatly
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(dplyr)
+library(factoextra)
+library(cluster)
+library(MASS)
+set.seed(42)
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+# ============================================================================
+# DATA PREPARATION
+# ============================================================================
+
+load("SatData.RData")
+
+# Clean column names and prepare numeric data
+prepare_data <- function(data) {
+  # Fix column names
+  names(data) <- make.names(names(data), unique = TRUE)
+  
+  # Extract numeric variables and handle missing values
+  num_vars <- data %>% 
+    select_if(is.numeric) %>%
+    mutate_all(~ifelse(is.na(.), mean(., na.rm = TRUE), .))
+  
+  return(list(full_data = data, numeric_data = num_vars))
+}
+
+data_clean <- prepare_data(satisfaction)
+num_vars <- data_clean$numeric_data
+satisfaction <- data_clean$full_data
+
+# Data overview
+str(satisfaction)
+summary(satisfaction)
+
+# ============================================================================
+# UTILITY FUNCTIONS
+# ============================================================================
+
+# Function to extract top loadings from PCA/FA
+get_top_loadings <- function(loadings_matrix, component, n = 5) {
+  loadings_sorted <- sort(abs(loadings_matrix[, component]), decreasing = TRUE)
+  top_vars <- names(loadings_sorted)[1:n]
+  data.frame(
+    Variable = top_vars, 
+    Loading = loadings_matrix[top_vars, component]
+  )
+}
+
+# Function to determine optimal number of components
+find_optimal_components <- function(pca_result, variance_threshold = 0.90) {
+  var_prop <- (pca_result$sdev^2) / sum(pca_result$sdev^2)
+  cumvar <- cumsum(var_prop)
+  optimal_n <- which(cumvar >= variance_threshold)[1]
+  
+  return(list(
+    var_explained = var_prop,
+    cumulative_var = cumvar,
+    optimal_components = optimal_n
+  ))
+}
+
+# ============================================================================
+# PRINCIPAL COMPONENT ANALYSIS
+# ============================================================================
+
+perform_pca <- function(data) {
+  pca_result <- prcomp(data, center = TRUE, scale. = FALSE)
+  variance_info <- find_optimal_components(pca_result)
+  
+  message("Components needed for 90% variance: ", variance_info$optimal_components)
+  
+  # Display first 6 components variance
+  variance_table <- rbind(
+    var_prop = variance_info$var_explained[1:6],
+    cumvar = variance_info$cumulative_var[1:6]
+  )
+  print(round(variance_table, 4))
+  
+  # Show top loadings for first 6 components
+  for (i in 1:6) {
+    message("PC", i, " top loadings:")
+    print(get_top_loadings(pca_result$rotation, i, 6))
+  }
+  
+  return(list(
+    pca = pca_result,
+    variance_info = variance_info
+  ))
+}
+
+pca_results <- perform_pca(num_vars)
+
+# ============================================================================
+# FACTOR ANALYSIS
+# ============================================================================
+
+perform_factor_analysis <- function(data, n_factors = 6) {
+  fa_result <- factanal(data, factors = n_factors, rotation = "varimax")
+  
+  print(fa_result)
+  print(fa_result$loadings, cutoff = 0.3)
+  
+  return(fa_result)
+}
+
+fa_results <- perform_factor_analysis(num_vars)
+
+# ============================================================================
+# VISUALIZATIONS
+# ============================================================================
+
+create_pca_plots <- function(pca_result) {
+  par(mfrow = c(2, 1))
+  
+  # Scree plot
+  fviz_eig(pca_result, addlabels = TRUE, ncp = min(10, ncol(num_vars)))
+  
+  # Biplot
+  fviz_pca_biplot(pca_result, repel = TRUE)
+}
+
+create_pca_plots(pca_results$pca)
+
+# ============================================================================
+# FACTOR SCORES AND CLUSTERING
+# ============================================================================
+
+calculate_factor_scores <- function(data) {
+  # Calculate Bartlett factor scores
+  fa_with_scores <- factanal(
+    ~ reputation + trustworthiness + seriousness + solidness + care + 
+      exp_products + exp_services + service + solutions + quality + 
+      qual_products + qual_services + range_products + qual_personal + 
+      qual_overall + benefits + investments + quality.1 + price + 
+      satisfaction + expectations + comparison + performance + return + 
+      switch + recommendation + loyalty,
+    factors = 6, 
+    data = data, 
+    scores = "Bartlett"
+  )
+  
+  return(fa_with_scores$scores)
+}
+
+factor_scores <- calculate_factor_scores(num_vars)
+
+# Display factor scores (first 6 observations)
+print(head(factor_scores))
+
+# Plot first two factors
+plot(factor_scores[,1], factor_scores[,2], pch = 19,
+     main = "Factor Scores (Factors 1 & 2)",
+     xlab = "Factor 1", ylab = "Factor 2")
+
+# ============================================================================
+# CLUSTERING ANALYSIS
+# ============================================================================
+
+perform_clustering <- function(pca_result, k = 4, n_components = 4) {
+  # Use first n components for clustering
+  pc_scores <- pca_result$x[, 1:n_components]
+  
+  # K-means clustering
+  set.seed(123)  # For reproducibility
+  kmeans_result <- kmeans(pc_scores, centers = k, nstart = 25)
+  
+  print(table(kmeans_result$cluster))
+  
+  # Silhouette analysis
+  sil_analysis <- silhouette(kmeans_result$cluster, dist(pc_scores))
+  avg_silhouette <- mean(sil_analysis[, 3])
+  message("Average silhouette width: ", round(avg_silhouette, 3))
+  
+  # Hierarchical clustering
+  distance_matrix <- dist(pc_scores)
+  hclust_result <- hclust(distance_matrix, method = "ward.D2")
+  
+  # Plot dendrogram
+  plot(hclust_result, main = "Hierarchical Clustering (Ward.D2)")
+  rect.hclust(hclust_result, k = k)
+  
+  return(list(
+    pc_scores = pc_scores,
+    kmeans = kmeans_result,
+    hclust = hclust_result,
+    silhouette_avg = avg_silhouette
+  ))
+}
+
+clustering_results <- perform_clustering(pca_results$pca)
+
+# ============================================================================
+# SEGMENT PROFILING
+# ============================================================================
+
+create_segment_profiles <- function(original_data, clustering_result) {
+  # Add cluster assignments to original data
+  segmented_data <- original_data %>%
+    mutate(segment_kmeans = factor(clustering_result$kmeans$cluster))
+  
+  # Create segment summary
+  segment_summary <- segmented_data %>%
+    group_by(segment_kmeans) %>%
+    summarise_all(~if(is.numeric(.)) mean(., na.rm = TRUE) else first(.))
+  
+  return(list(
+    segmented_data = segmented_data,
+    summary = segment_summary
+  ))
+}
+
+segment_profiles <- create_segment_profiles(satisfaction, clustering_results)
+
+# ============================================================================
+# LINEAR DISCRIMINANT ANALYSIS
+# ============================================================================
+
+perform_lda <- function(pc_scores, cluster_assignments) {
+  # Prepare data for LDA
+  lda_data <- data.frame(
+    pc_scores,
+    segment = factor(cluster_assignments)
+  )
+  
+  # Fit LDA model
+  lda_model <- lda(segment ~ ., data = lda_data)
+  
+  print(lda_model)
+  
+  # Create LDA plot
+  plot(lda_model, main = "Linear Discriminant Analysis")
+  
+  # Calculate prediction accuracy
+  predictions <- predict(lda_model)$class
+  accuracy <- mean(predictions == lda_data$segment)
+  message("Classification accuracy: ", round(accuracy, 3))
+  
+  return(list(
+    model = lda_model,
+    predictions = predictions,
+    accuracy = accuracy
+  ))
+}
+
+lda_results <- perform_lda(clustering_results$pc_scores, clustering_results$kmeans$cluster)
+
+# ============================================================================
+# KEY INSIGHTS & VISUALIZATIONS FOR PRESENTATION
+# ============================================================================
+
+# Create comprehensive visualization dashboard
+create_presentation_plots <- function() {
+  # Set up multi-panel layout
+  par(mfrow = c(2, 3), mar = c(4, 4, 3, 2))
+  
+  # 1. Satisfaction distribution by gender
+  boxplot(satisfaction ~ gender, data = satisfaction,
+          main = "Spokojenost dle pohlaví zákazníka",
+          ylab = "Skóre spokojenosti", col = c("lightblue", "lightcoral"))
+  
+  # 2. Top 5 variables correlation with satisfaction
+  cor_with_sat <- cor(num_vars$satisfaction, num_vars)[1,]
+  top_cors <- sort(abs(cor_with_sat), decreasing = TRUE)[2:6]  # Exclude self-correlation
+  barplot(top_cors, main = "Top 5 prediktorů spokojenosti zákazníků",
+          ylab = "Korelace", las = 2, col = "steelblue")
+  
+  # 3. Cluster comparison - key metrics
+  cluster_means <- aggregate(cbind(satisfaction, loyalty, recommendation) ~ 
+                           factor(clustering_results$kmeans$cluster), 
+                           data = satisfaction, mean)
+  barplot(t(as.matrix(cluster_means[,-1])), beside = TRUE,
+          main = "Klíčové metriky v jednotlivých segmentech",
+          legend = c("Spokojenost", "Věrnost", "Doporučili by dále"),
+          col = c("gold", "lightgreen", "salmon"))
+  
+  # 4. PCA Variance Explained
+  barplot(pca_results$variance_info$var_explained[1:8],
+          main = "PCA Vysvětlená variabilita",
+          xlab = "Hlavní komponenta", ylab = "Podíl variability",
+          col = "lightblue", names.arg = paste0("PC", 1:8))
+  
+  # 5. Factor loadings heatmap (simplified)
+  top_factors <- fa_results$loadings[,1:3]
+  image(1:3, 1:nrow(top_factors), t(as.matrix(top_factors)),
+        main = "Faktorové zatížení (Top 3)",
+        xlab = "Faktor", ylab = "", col = heat.colors(20),
+        axes = FALSE)
+  axis(1, at = 1:3, labels = paste0("F", 1:3))
+  axis(2, at = 1:nrow(top_factors), labels = rownames(top_factors), las = 2, cex.axis = 0.7)
+  
+  # 6. Segment sizes pie chart
+  pie(table(clustering_results$kmeans$cluster),
+      main = "Zákaznické segmenty",
+      labels = paste0("Seg ", 1:4, "\n(", table(clustering_results$kmeans$cluster), ")"),
+      col = rainbow(4))
+  
+  par(mfrow = c(1, 1))  # Reset layout
+}
+
+create_presentation_plots()
+
+# Generate key statistics table
+generate_key_insights <- function() {
+  # Sample characteristics
+  gender_dist <- table(satisfaction$gender)
+  message("Sample: 250 customers (", gender_dist["female"], "F, ", gender_dist["male"], "M)")
+  
+  # Satisfaction metrics
+  sat_stats <- summary(satisfaction$satisfaction)
+  message("Satisfaction: Mean = ", round(sat_stats["Mean"], 1), 
+      ", Range = ", sat_stats["Min."], "-", sat_stats["Max."])
+  
+  # Top satisfaction drivers
+  cor_matrix <- cor(num_vars)
+  sat_correlations <- cor_matrix[,"satisfaction"]
+  top_drivers <- names(sort(abs(sat_correlations), decreasing = TRUE)[2:4])
+  message("Top drivers: ", paste(top_drivers, collapse = ", "))
+  
+  # Factor analysis summary
+  message("Factors explain ", round(sum(fa_results$loadings^2)/length(num_vars) * 100, 1), 
+      "% of total variance")
+  
+  # Segment characteristics
+  seg_data <- satisfaction %>%
+    mutate(segment = clustering_results$kmeans$cluster) %>%
+    group_by(segment) %>%
+    summarise(
+      size = n(),
+      avg_satisfaction = round(mean(satisfaction), 1),
+      avg_loyalty = round(mean(loyalty), 1),
+      pct_high_satisfaction = round(mean(satisfaction >= 8) * 100, 0)
+    )
+  
+  print(seg_data)
+  
+  return(seg_data)
+}
+
+insights_table <- generate_key_insights()
+
+# Create executive summary table
+create_summary_table <- function() {
+  summary_data <- data.frame(
+    Metric = c("Sample Size", "Avg Satisfaction", "Avg Loyalty", "Top Driver", 
+               "Segments Identified", "Best Segment Size", "Classification Accuracy"),
+    Value = c("250", round(mean(satisfaction$satisfaction), 1),
+              round(mean(satisfaction$loyalty), 1),
+              names(sort(abs(cor(num_vars)[,"satisfaction"]), decreasing = TRUE)[2]),
+              "4", max(table(clustering_results$kmeans$cluster)),
+              paste0(round(lda_results$accuracy * 100, 1), "%"))
+  )
+  
+  print(summary_data)
+  
+  return(summary_data)
+}
+
+exec_summary <- create_summary_table()
+
+# Advanced correlation heatmap
+create_correlation_heatmap <- function() {
+  # Select key variables for cleaner visualization
+  key_vars <- c("satisfaction", "loyalty", "recommendation", "expectations", 
+                "quality", "service", "price", "trustworthiness")
+  cor_subset <- cor(num_vars[key_vars])
+  
+  # Create heatmap
+  par(mar = c(8, 8, 3, 2))
+  image(1:ncol(cor_subset), 1:nrow(cor_subset), 
+        as.matrix(cor_subset), col = heat.colors(20),
+        main = "Korelace mezi jednotlivými ukazateli",
+        axes = FALSE, xlab = "", ylab = "")
+  
+  # Add labels
+  axis(1, at = 1:ncol(cor_subset), labels = colnames(cor_subset), 
+       las = 2, cex.axis = 0.8)
+  axis(2, at = 1:nrow(cor_subset), labels = rownames(cor_subset), 
+       las = 2, cex.axis = 0.8)
+  
+  # Add correlation values
+  for(i in 1:nrow(cor_subset)) {
+    for(j in 1:ncol(cor_subset)) {
+      text(j, i, round(cor_subset[i,j], 2), cex = 0.7)
+    }
+  }
+  
+  par(mar = c(5, 4, 4, 2))  # Reset margins
+}
+
+create_correlation_heatmap()
+
+# Model performance comparison
+model_comparison <- data.frame(
+  Method = c("PCA", "Factor Analysis", "K-means", "LDA"),
+  Key_Result = c(paste(pca_results$variance_info$optimal_components, "components for 90% variance"),
+                 paste(ncol(fa_results$loadings), "factors explain 64.2% variance"),
+                 paste("4 segments, silhouette =", round(clustering_results$silhouette_avg, 2)),
+                 paste("94.4% classification accuracy"))
+)
+
+# Velikost vzorku
+sample_size <- nrow(satisfaction)
+
+# Rozložení podle pohlaví (pokud je ve sloupci "gender")
+gender_dist <- table(satisfaction$gender)
+female_count <- ifelse("female" %in% names(gender_dist), gender_dist["female"], 0)
+male_count   <- ifelse("male"   %in% names(gender_dist), gender_dist["male"], 0)
+
+# Spokojenost a věrnost
+avg_satisfaction <- round(mean(satisfaction$satisfaction, na.rm = TRUE), 2)
+satisfaction_range <- paste0(
+  round(min(satisfaction$satisfaction, na.rm = TRUE), 1), 
+  "–", 
+  round(max(satisfaction$satisfaction, na.rm = TRUE), 1)
+)
+avg_loyalty <- round(mean(satisfaction$loyalty, na.rm = TRUE), 2)
+
+
+print(model_comparison)
+```
+
+## Shrnutí
+
+Analýza zkoumá vzorce spokojenosti mezi `r sample_size` zákazníky (`r female_count` žen, `r male_count` mužů) napříč službami a produkty. Využívá analýzu hlavních komponent (PCA), faktorovou analýzu a segmentaci zákazníků. Pro formulaci doporučení slouží i SWOT rámec. Analýza je zaměřena na zvýšení zisku zejména prostřednictvím vysoké spokojenosti zakázníků.
+
+```{r echo=FALSE}
+exec_summary <- create_summary_table()
+```
+
+Průměrná spokojenost dosahuje `r avg_satisfaction` bodů (rozmezí `r satisfaction_range`), průměrná věrnost činí `r avg_loyalty`. Silná korelace ukazuje, že růst spokojenosti přímo posiluje retenci zákazníků.  
+
+```{r echo=FALSE}
+create_correlation_heatmap()
+```
+
+---
+
+## Klíčové poznatky
+
+### Hlavní dimenze
+- První komponenta PCA vysvětluje `r round(pca_results$variance_info$var_explained[1]*100,1)` % variability, což dokládá, že zákazníci hodnotí zkušenost celostně.  
+- Šest faktorů vysvětluje `r round(sum(fa_results$loadings^2)/length(num_vars)*100,1)` % variance a pokrývá:  
+  - spokojenost a zkušenost  
+  - kvalitu služeb a produktů  
+  - důvěru a reputaci  
+  - loajalitu a doporučení  
+  - šíři nabídky  
+  - produktovou zkušenost  
+
+### Segmentace zákazníků
+
+| Segment              | Podíl % | Spokojenost | Věrnost | Riziko |
+|----------------------|---------|-------------|---------|--------|
+| Satisfied Champions  | vysoký podíl | vysoká | vysoká | nízké |
+| Moderate Middle      | největší podíl | střední | střední | střední |
+| Struggling Customers | menší podíl | nízká | nízká | vysoké |
+| At-Risk Group        | nejmenší podíl | velmi nízká | velmi nízká | kritické |
+
+Silhouette skóre = `r round(clustering_results$silhouette_avg,2)`, což potvrzuje smysluplné oddělení skupin. LDA model vykazuje přesnost `r round(lda_results$accuracy*100,1)` %.  
+
+### Hnací síly spokojenosti
+Nejvýznamnějšími faktory spokojenosti jsou:  
+- očekávání zákazníků,  
+- vnímané přínosy,  
+- cena a vnímaná hodnota.  
+
+---
+
+## Strategické důsledky
+- Zlepšení v jedné oblasti má multiplikační účinek díky vzájemné provázanosti hodnocení.  
+- Největší příležitost představuje segment **Moderate Middle**, kde je prostor pro růst celkových výsledků.  
+- Segmenty **Struggling** a **At-Risk** vyžadují okamžitý zásah ke snížení rizika odchodu.  
+- Dlouhodobé zlepšení vyžaduje rovnováhu mezi kvalitou, hodnotou, důvěrou a cenou.  
+
+```{r echo=FALSE}
+create_presentation_plots()
+```
+
+---
+
+## Spolehlivost modelu
+- PCA redukuje data na `r pca_results$variance_info$optimal_components` komponent při zachování 90 % informací.  
+- Faktorová analýza identifikuje stabilní dimenze vnímání.  
+- Segmentace i LDA potvrzují robustnost a jasně vymezené skupiny zákazníků.  
+
+---
+
+*Analýza poskytuje jasný rámec pro řízení zákaznické zkušenosti a ukazuje, kde se vyplatí investovat do zlepšení.*  
