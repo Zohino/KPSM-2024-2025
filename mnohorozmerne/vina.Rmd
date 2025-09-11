@@ -75,6 +75,19 @@ X <- wine[, -1]
 
 ### 1. Rozdíly mezi odrůdami (MANOVA + jednorozměrné ANOVA)
 
+#### Testované hypotézy
+
+##### Multivariační test (MANOVA)
+- H0: Vektor středních hodnot všech sledovaných proměnných je stejný ve všech skupinách (odrůdách vína).
+- H1: Alespoň pro jednu proměnnou se střední hodnoty mezi odrůdami liší.
+
+##### Jednorozměrné ANOVY (pro každou proměnnou zvlášť)
+Pro každou z 13 proměnných (např. Flavanoids, Proline, Alcohol, …):
+
+- H0: Průměrná hodnota dané proměnné je stejná u všech tří odrůd vína.
+- H1: Existuje alespoň jedna odrůda, která se v průměrné hodnotě této proměnné liší od ostatních.
+
+
 ```{r}
 fit <- manova(as.matrix(X) ~ Cultivar, data = wine)
 # multivariatni test (Wilks)
@@ -82,6 +95,7 @@ manova_summary <- summary(fit, test = "Wilks")
 manova_summary
 # jednorozmerne ANOVY -> ktere promenne nejvice rozlisují
 anova_list <- summary.aov(fit)
+anova_list
 # vypocet "eta^2" (podil mezi-group SS na total SS) pro kazdou promenou
 eta2 <- sapply(names(anova_list), function(nm){
 a <- anova_list[[nm]]
@@ -93,7 +107,7 @@ eta2_df <- data.frame(Variable = names(eta2), Eta2 = eta2)
 eta2_df[order(-eta2_df$Eta2), ]
 ```
 
-Multivariační test Wilksovým λ ukazuje extrémně silný celkový efekt kultivaru na všech 13 proměnných (λ = 0,019, F(26,326) = 77,6, p < 2,2e−16), což potvrzuje, že mnohorrozměrně se skupiny výrazně liší. Jednotlivé ANOVY s výpočtem eta² naznačují, které znaky nesou největší diskriminační informaci: nejvýrazněji rozlišují Flavanoids (η² ≈ 0,73), Proline (0,70) a OD280/OD315 (0,68), tedy ukazatele obsahu fenolických látek a spektrálních vlastností vín, spolu s Alcohol (0,61) a Color.intensity (0,58). Naopak Ash a Magnesium mají jen slabou vysvětlovanou variabilitu (< 0,15), tudíž se mezi kultivary překrývají. Celkově je rozlišení mezi třemi odrůdami silně podmíněno fenolickým profilem a intenzitou barvy, zatímco elementární složky hrají menší roli.
+Multivariační test Wilksovým λ ukazuje extrémně silný celkový efekt kultivaru na všech 13 proměnných (λ = 0,019, F(26,326) = 77,6, p < 2,2e−16, p-hodnota < 0,05 znamená, že zamítáme H0), což potvrzuje, že mnohorozměrně se skupiny výrazně liší. Jednotlivé ANOVY s výpočtem eta² naznačují, které znaky nesou největší diskriminační informaci: nejvýrazněji rozlišují Flavanoids (η² ≈ 0,73), Proline (0,70) a OD280/OD315 (0,68), tedy ukazatele obsahu fenolických látek a spektrálních vlastností vín, spolu s Alcohol (0,61) a Color.intensity (0,58). Naopak Ash a Magnesium mají jen slabou vysvětlovanou variabilitu (< 0,15), tudíž se mezi kultivary překrývají. Celkově je rozlišení mezi třemi odrůdami silně podmíněno fenolickým profilem a intenzitou barvy, zatímco elementární složky hrají menší roli. U všech 13 proměnných je p-hodnota nízká (většinou < 2,2e-16, největší ≈ 9e-6). To znamená, že nulové hypotézy u všech proměnných zamítáme. Všechny sledované znaky se statisticky významně liší mezi odrůdami vín.
 
 Multivariační test jednoznačně potvrzuje statisticky významné rozdíly v chemickém složení mezi třemi odrůdami vín. Největší rozdíly se ukazují v obsahu flavonoidů, který má nejvyšší podíl vysvětlené variability (η² ≈ 0,73), těsně následovaný koncentrací prolinu a poměrem OD280/OD315, tedy ukazateli fenolického profilu a spektrálních vlastností vín.
 
@@ -117,6 +131,36 @@ top_loadings(loadings, 2, 6)
 top_loadings(loadings, 3, 6)
 ```
 
+```{r}
+# Faktorová analýza se 3 faktory (dle výsledků PCA)
+fa <- factanal(X, factors = 3, rotation = "varimax") # varimax je default
+fa
+
+# Faktorová zatížení (loadings)
+print(fa$loadings, cutoff = 0.3)
+
+# Výpočet faktorových skóre pro jednotlivá pozorování
+sc <- factanal(~Alcohol + Malic.acid + Ash + Alcalinity.of.ash +
+                 Magnesium + Total.phenols + Flavanoids +
+                 Nonflavanoid.phenols + Proanthocyanin +
+                 Color.intensity + Hue + OD280.OD315.of.diluted.wines +
+                 Proline,
+               factors = 3, data = wine, scores = "Bartlett")$scores
+
+# Faktorové skóre
+head(sc)
+
+# Grafické zobrazení – první dva faktory
+plot(sc[,1], sc[,2], pch = 19,
+     col = wine$Cultivar,
+     main = "První 2 faktory (Bartlettova skóre)",
+     xlab = "Faktor 1", ylab = "Faktor 2")
+legend("topright", legend = levels(wine$Cultivar),
+       col = 1:3, pch = 19, bty = "n")
+```
+
+#### PCA
+
 Analýza hlavních komponent ukazuje, že první tři komponenty vysvětlují zhruba 67 % variability (36 %, 19 % a 11 %), a k dosažení hranice 90 % je třeba osmi komponent, které nahradí původních třináct a ztráta informace bude malá. To znamená, že datová struktura je poměrně komplexní. První komponenta je nejsilněji svázána s fenolickými látkami (flavonoidy, celkové fenoly, OD280/OD315) a charakterizuje tedy fenolický profil vín. Druhá komponenta odráží především obsah alkoholu, intenzitu barvy a prolin, tedy ukazatele alkoholové síly, zbarvení a zralosti hroznů. Třetí komponenta je nejvíce spojena s popelem a alkalinitou popela, tedy minerálním složením. Celkově lze říci, že největší rozlišovací schopnost mezi víny je v chemických ukazatelích fenolů a barvy, zatímco minerální složky se projeví až na dalších dimenzích.
 
 | Komponenta | Vysvětlená variabilita | Hlavní proměnné (největší zátěže)           | Interpretace                                               |
@@ -125,32 +169,68 @@ Analýza hlavních komponent ukazuje, že první tři komponenty vysvětlují zh
 | PC2        | 19 %                   | Color.intensity, Alcohol, Proline, Ash, Magnesium | Síla a barva vína – alkohol, intenzita barvy, zralost hroznů|
 | PC3        | 11 %                   | Ash, Alcalinity.of.ash, Alcohol (opačná zátěž)     | Mineralita – obsah popela a alkalita             |
 
+#### Faktorová analýza
+
+Extrahovány jsou 3 faktory (výchozí varimax rotace), které vysvětlují dohromady 58 % variability. Test hypotézy o dostatečnosti 3 faktorů (χ² = 158,55, df = 42, p < 0.001) ukazuje, že nulová hypotéza, že 3 faktory postačují, je zamítnuta a pro přesnější popis by bylo třeba více faktorů. To také koresponduje s výsledky PCA (≥8 komponent pro 90 % variability).  
+
+Interpretace faktorů:
+
+| Faktor                     | Součásti                                                     |
+| -------------------------- | ------------------------------------------------------------ |
+|**F1 (fenolický faktor):**  | Flavanoids, Total phenols, OD280/OD315, Proanthocyanin, Hue. |  
+|**F2 (síla a barva vína):** | Alcohol, Color intensity, Proline.                           |
+|**F3 (minerální faktor):**  | Ash, Alcalinity of ash.                                      |
+
 ---
 
 ### 3. Klasifikace (LDA, QDA) — lze podle chemie identifikovat odrůdu?
 
 ```{r}
+# Train-test split 70:30
+train_idx <- sample(nrow(wine), 0.7 * nrow(wine))
+train_data <- wine[train_idx, ]
+test_data <- wine[-train_idx, ]
+
+# LDA s train-test
+lda_fit <- lda(Cultivar ~ ., data = train_data)
+lda_pred <- predict(lda_fit, test_data)
+res_lda_split <- acc_table(test_data$Cultivar, lda_pred$class)
+res_lda_split$table
+res_lda_split$accuracy
+
+# QDA s train-test
+qda_fit <- qda(Cultivar ~ ., data = train_data)
+qda_pred <- predict(qda_fit, test_data)
+res_qda_split <- acc_table(test_data$Cultivar, qda_pred$class)
+res_qda_split$table
+res_qda_split$accuracy
+
 # LDA s LOOCV
-lda_cv <- lda(Cultivar ~ ., data = wine, CV = TRUE)
+lda_cv <- lda(Cultivar ~ ., data = wine, prior = c(1/3, 1/3, 1/3), CV = TRUE)
 res_lda <- acc_table(wine$Cultivar, lda_cv$class)
 res_lda$table
 res_lda$accuracy
-
 
 # LDA bez CV (pro zobrazeni diskr. funkci)
 lda_fit <- lda(Cultivar ~ ., data = wine)
 # diskriminacni skore (2 funkce, protoze g=3)
 head(predict(lda_fit)$x)
 
-
 # QDA s LOOCV
-qda_cv <- qda(Cultivar ~ ., data = wine, CV = TRUE)
+qda_cv <- qda(Cultivar ~ ., data = wine, prior = c(1/3, 1/3, 1/3), CV = TRUE)
 res_qda <- acc_table(wine$Cultivar, qda_cv$class)
 res_qda$table
 res_qda$accuracy
 ```
 
-Výsledky ukazují, že jak lineární diskriminační analýza (LDA), tak kvadratická diskriminační analýza (QDA) dosahují velmi vysoké klasifikační přesnosti při rozlišování odrůd vín na základě jejich chemického složení. LDA s leave-one-out křížovou validací klasifikuje správně téměř všechny vzorky s přesností 98,9 %, přičemž k chybám dochází jen výjimečně u několika málo vín druhé odrůdy. QDA dosahuje ještě mírně lepší přesnosti 99,4 %, tedy prakticky perfektního rozlišení, což naznačuje, že mezi odrůdami existují výrazné a stabilní rozdíly v chemickém profilu a že diskriminační metody jsou pro tuto datovou sadu velmi vhodné. Pro datovou sadu s třemi odrůdami jsou potřebné dvě diskriminační funkce (počet funkcí = počet skupin − 1), které postačují k jednoznačnému přiřazení vzorků ke správné odrůdě.
+Výsledky potvrzují, že chemické složení umožňuje vysoce přesnou identifikaci odrůd vín. LDA dosahuje přesnosti 100% na testovací sadě (train-test split) a 98,9% při LOOCV se stejnými apriorními pravděpodobnostmi. QDA vykazuje 96,3% přesnost na testovací sadě a 99,4% při LOOCV. 
+
+Rozdíl mezi metodami je minimální - QDA s LOOCV dosahuje nejlepších výsledků (99,4%), zatímco na samostatné testovací sadě překvapivě dominuje LDA (100% vs 96,3%). Chyby se vyskytují sporadicky, hlavně u odrůdy 2, kde dochází k záměně za odrůdy 1 nebo 3.
+
+Pro tři odrůdy jsou potřebné dvě diskriminační funkce (LD1, LD2), které jednoznačně oddělují vzorky. Výsledky jednoznačně dokazují, že chemický profil je vysoce spolehlivým identifikátorem odrůd vín.
+
+> lda {MASS}	R Documentation  
+CV If true, returns results (classes and posterior probabilities) for leave-one-out cross-validation. Note that if the prior is estimated, the proportions in the whole dataset are used.
 
 ---
 
